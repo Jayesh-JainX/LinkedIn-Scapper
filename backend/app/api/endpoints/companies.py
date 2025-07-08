@@ -1,0 +1,126 @@
+from fastapi import APIRouter, HTTPException, BackgroundTasks
+from pydantic import BaseModel
+from typing import List, Optional
+import logging
+
+from app.models.company import CompanyAnalysis
+from app.services.linkedin_scraper import LinkedInScraper
+from app.services.data_processor import DataProcessor
+from app.services.insight_generator import InsightGenerator
+
+router = APIRouter()
+logger = logging.getLogger(__name__)
+
+class CompanyAnalysisRequest(BaseModel):
+    company_name: str
+    competitors: Optional[List[str]] = []
+    include_employees: bool = True
+    include_posts: bool = True
+    include_jobs: bool = True
+    max_employees: int = 100
+    days_back: int = 30
+
+class CompanyAnalysisResponse(BaseModel):
+    company: dict
+    recent_posts: List[dict]
+    job_postings: List[dict]
+    employees: List[dict]
+    key_metrics: dict
+    status: str = "completed"
+
+@router.post("/analyze", response_model=CompanyAnalysisResponse)
+async def analyze_company(request: CompanyAnalysisRequest, background_tasks: BackgroundTasks):
+    """Analyze a company's LinkedIn presence and generate insights"""
+    if not request.company_name.strip():
+        raise HTTPException(status_code=400, detail="Company name is required")
+
+    try:
+        logger.info(f"Starting analysis for company: {request.company_name}")
+        
+        # Initialize services
+        scraper = LinkedInScraper()
+        processor = DataProcessor()
+        
+        try:
+            # Scrape company data
+            raw_data = await scraper.scrape_company_data(request.company_name)
+        except Exception as e:
+            logger.error(f"Failed to scrape data: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Failed to collect company data: {str(e)}")
+        
+        try:
+            # Process the data
+            analysis = await processor.process_company_data(raw_data)
+        except Exception as e:
+            logger.error(f"Failed to process data: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Failed to process company data: {str(e)}")
+        
+        # Format response
+        try:
+            response = CompanyAnalysisResponse(
+                company=analysis.company.dict(),
+                recent_posts=[post.dict() for post in analysis.recent_posts],
+                job_postings=[job.dict() for job in analysis.job_postings],
+                employees=[emp.dict() for emp in raw_data.get('employees', [])],
+                key_metrics=analysis.key_metrics
+            )
+        except Exception as e:
+            logger.error(f"Failed to format response: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Failed to format analysis response: {str(e)}")
+        
+        logger.info(f"Analysis completed for {request.company_name}")
+        return response
+        
+    except Exception as e:
+        logger.error(f"Error analyzing company {request.company_name}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
+
+@router.get("/{company_name}/basic-info")
+async def get_company_basic_info(company_name: str):
+    """Get basic company information"""
+    try:
+        scraper = LinkedInScraper()
+        data = await scraper.scrape_company_data(company_name)
+        
+        return {
+            "name": data["company"].name,
+            "industry": data["company"].industry,
+            "size": data["company"].size,
+            "headquarters": data["company"].headquarters,
+            "employee_count": data["company"].employee_count,
+            "follower_count": data["company"].follower_count
+        }
+    except Exception as e:
+        logger.error(f"Error fetching basic info for {company_name}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch company info: {str(e)}")
+
+@router.get("/{company_name}/posts")
+async def get_company_posts(company_name: str, limit: int = 10):
+    """Get recent company posts"""
+    try:
+        scraper = LinkedInScraper()
+        data = await scraper.scrape_company_data(company_name)
+        
+        posts = data["recent_posts"][:limit]
+        return [post.dict() for post in posts]
+        
+    except Exception as e:
+        logger.error(f"Error fetching posts for {company_name}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch posts: {str(e)}")
+
+@router.get("/{company_name}/jobs")
+async def get_company_jobs(company_name: str, department: Optional[str] = None):
+    """Get current job postings"""
+    try:
+        scraper = LinkedInScraper()
+        data = await scraper.scrape_company_data(company_name)
+        
+        jobs = data["job_postings"]
+        if department:
+            jobs = [job for job in jobs if job.department.lower() == department.lower()]
+            
+        return [job.dict() for job in jobs]
+        
+    except Exception as e:
+        logger.error(f"Error fetching jobs for {company_name}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch jobs: {str(e)}")
