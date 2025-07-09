@@ -28,7 +28,7 @@ app = FastAPI(
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:3001"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -39,15 +39,11 @@ app.include_router(api_router, prefix="/api")
 
 @app.get("/")
 async def root():
-    return {"message": "LinkedIn Research Tool API", "version": "1.0.0"}
+    return {"message": "LinkedIn Research Tool API", "version": "1.0.0", "status": "running"}
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy", "service": "linkedin-research-api"}
-
-@app.get("/")
-async def health_check():
-    return {"status": "healthy", "service": "linkedin-research-api"}
+    return {"status": "healthy", "service": "linkedin-research-api", "version": "1.0.0"}
 
 if __name__ == "__main__":
     import uvicorn

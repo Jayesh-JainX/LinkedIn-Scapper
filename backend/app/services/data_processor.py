@@ -38,7 +38,7 @@ class DataProcessor:
         """Calculate key business metrics from raw data"""
         metrics = {}
         
-        # Employee metrics
+        # Employee metrics - raw_data['employees'] contains dictionaries
         employees = raw_data.get('employees', [])
         metrics['total_employees'] = len(employees)
         metrics['recent_hires'] = await self._count_recent_hires(employees)
@@ -60,10 +60,18 @@ class DataProcessor:
         
         return metrics
     
-    async def _count_recent_hires(self, employees: List[EmployeeProfile]) -> int:
+    async def _count_recent_hires(self, employees: List[Dict[str, Any]]) -> int:
         """Count employees hired in the last 30 days"""
-        # Mock implementation - in real scenario, would check hire dates
-        return len([emp for emp in employees if 'months' in emp.employee.tenure or '1 year' in emp.employee.tenure])
+        # employees is a list of dictionaries, not objects
+        recent_hire_indicators = ['6 months', '1 year', 'months']
+        recent_hires = 0
+        
+        for emp in employees:
+            tenure = emp.get('tenure', '')
+            if any(indicator in tenure for indicator in recent_hire_indicators):
+                recent_hires += 1
+                
+        return recent_hires
     
     async def _analyze_hiring_by_department(self, job_postings: List[JobPosting]) -> Dict[str, int]:
         """Analyze hiring activity by department"""
@@ -96,24 +104,28 @@ class DataProcessor:
         
         return trends
     
-    async def analyze_leadership_changes(self, employees: List[EmployeeProfile]) -> List[LeadershipChange]:
+    async def analyze_leadership_changes(self, employees: List[Dict[str, Any]]) -> List[LeadershipChange]:
         """Analyze leadership and senior role changes"""
         logger.info("Analyzing leadership changes")
         
         changes = []
-        senior_levels = ['manager', 'director', 'vp', 'c_level']
+        senior_keywords = ['manager', 'director', 'vp', 'chief', 'head', 'lead']
+        
+        # Filter senior employees based on title keywords
+        senior_employees = [
+            emp for emp in employees 
+            if any(keyword in emp.get('title', '').lower() for keyword in senior_keywords)
+        ]
         
         # Mock leadership changes - in real implementation, would track role changes over time
-        senior_employees = [emp for emp in employees if emp.employee.level.value in senior_levels]
-        
         for i, emp in enumerate(senior_employees[:3]):  # Mock recent changes
             change = LeadershipChange(
-                name=emp.employee.name,
+                name=emp.get('name', 'Unknown'),
                 previous_role="Senior Manager" if i == 0 else None,
-                new_role=emp.employee.title,
+                new_role=emp.get('title', 'Unknown'),
                 date=datetime.now() - timedelta(days=i*10 + 5),
                 type=ChangeType.PROMOTION if i == 0 else ChangeType.HIRE,
-                department=emp.employee.department
+                department=emp.get('department', 'Unknown')
             )
             changes.append(change)
         

@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 from typing import List, Optional
 import logging
+from datetime import datetime
 
 from app.models.company import CompanyAnalysis
 from app.services.linkedin_scraper import LinkedInScraper
@@ -21,11 +22,13 @@ class CompanyAnalysisRequest(BaseModel):
     days_back: int = 30
 
 class CompanyAnalysisResponse(BaseModel):
-    company: dict
-    recent_posts: List[dict]
-    job_postings: List[dict]
+    name: str
+    industry: str
+    size: str
+    headquarters: str
+    recentPosts: List[dict]
+    jobPostings: List[dict]
     employees: List[dict]
-    key_metrics: dict
     status: str = "completed"
 
 @router.post("/analyze", response_model=CompanyAnalysisResponse)
@@ -55,14 +58,29 @@ async def analyze_company(request: CompanyAnalysisRequest, background_tasks: Bac
             logger.error(f"Failed to process data: {str(e)}")
             raise HTTPException(status_code=500, detail=f"Failed to process company data: {str(e)}")
         
-        # Format response
+        # Format response to match frontend interface
         try:
             response = CompanyAnalysisResponse(
-                company=analysis.company.dict(),
-                recent_posts=[post.dict() for post in analysis.recent_posts],
-                job_postings=[job.dict() for job in analysis.job_postings],
-                employees=[emp.dict() for emp in raw_data.get('employees', [])],
-                key_metrics=analysis.key_metrics
+                name=analysis.company.name,
+                industry=analysis.company.industry,
+                size=analysis.company.size,
+                headquarters=analysis.company.headquarters,
+                recentPosts=[{
+                    "id": post.id,
+                    "content": post.content,
+                    "date": post.date.isoformat(),
+                    "engagement": post.engagement,
+                    "type": post.type.value
+                } for post in analysis.recent_posts],
+                jobPostings=[{
+                    "id": job.id,
+                    "title": job.title,
+                    "location": job.location,
+                    "department": job.department,
+                    "datePosted": job.date_posted.isoformat(),
+                    "requirements": job.requirements
+                } for job in analysis.job_postings],
+                employees=raw_data.get('employees', [])
             )
         except Exception as e:
             logger.error(f"Failed to format response: {str(e)}")
@@ -102,7 +120,13 @@ async def get_company_posts(company_name: str, limit: int = 10):
         data = await scraper.scrape_company_data(company_name)
         
         posts = data["recent_posts"][:limit]
-        return [post.dict() for post in posts]
+        return [{
+            "id": post.id,
+            "content": post.content,
+            "date": post.date.isoformat(),
+            "engagement": post.engagement,
+            "type": post.type.value
+        } for post in posts]
         
     except Exception as e:
         logger.error(f"Error fetching posts for {company_name}: {str(e)}")
@@ -119,8 +143,84 @@ async def get_company_jobs(company_name: str, department: Optional[str] = None):
         if department:
             jobs = [job for job in jobs if job.department.lower() == department.lower()]
             
-        return [job.dict() for job in jobs]
+        return [{
+            "id": job.id,
+            "title": job.title,
+            "location": job.location,
+            "department": job.department,
+            "datePosted": job.date_posted.isoformat(),
+            "requirements": job.requirements
+        } for job in jobs]
         
     except Exception as e:
         logger.error(f"Error fetching jobs for {company_name}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to fetch jobs: {str(e)}")
+
+class CompetitorComparisonRequest(BaseModel):
+    companies: List[str]
+
+@router.post("/compare")
+async def compare_competitors(request: CompetitorComparisonRequest):
+    """Compare multiple companies across key metrics"""
+    try:
+        logger.info(f"Comparing {len(request.companies)} companies")
+        
+        insight_generator = InsightGenerator()
+        
+        # Get competitor data
+        competitor_data = await insight_generator._analyze_competitors(request.companies)
+        
+        # Format for frontend
+        comparison_data = []
+        for comp in competitor_data:
+            comparison_data.append({
+                "name": comp.name,
+                "hiringActivity": comp.hiring_activity,
+                "leadershipChanges": comp.leadership_changes,
+                "marketActivity": comp.market_activity
+            })
+        
+        return comparison_data
+        
+    except Exception as e:
+        logger.error(f"Error comparing competitors: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to compare competitors: {str(e)}")
+
+@router.get("/{company_name}/export")
+async def export_company_data(company_name: str, format: str = "json"):
+    """Export company data in specified format"""
+    try:
+        if format not in ["json", "csv", "pdf"]:
+            raise HTTPException(status_code=400, detail="Unsupported format. Use json, csv, or pdf.")
+        
+        scraper = LinkedInScraper()
+        data = await scraper.scrape_company_data(company_name)
+        
+        if format == "json":
+            return {
+                "company": {
+                    "name": data["company"].name,
+                    "industry": data["company"].industry,
+                    "size": data["company"].size,
+                    "headquarters": data["company"].headquarters
+                },
+                "posts_count": len(data["recent_posts"]),
+                "jobs_count": len(data["job_postings"]),
+                "employees_count": len(data["employees"]),
+                "export_date": datetime.now().isoformat()
+            }
+        else:
+            # For CSV and PDF, return a message indicating the feature would be implemented
+            return {
+                "message": f"{format.upper()} export functionality would be implemented here",
+                "data_summary": {
+                    "company": data["company"].name,
+                    "posts": len(data["recent_posts"]),
+                    "jobs": len(data["job_postings"]),
+                    "employees": len(data["employees"])
+                }
+            }
+        
+    except Exception as e:
+        logger.error(f"Error exporting data for {company_name}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to export data: {str(e)}")

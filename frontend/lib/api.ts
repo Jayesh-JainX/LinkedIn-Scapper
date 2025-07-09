@@ -1,10 +1,11 @@
-const API_BASE_URL = 'http://localhost:8000/api'
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api'
 
 export interface CompanyData {
   name: string
   industry: string
   size: string
   headquarters: string
+  founded?: number
   recentPosts: Post[]
   jobPostings: JobPosting[]
   employees: Employee[]
@@ -25,6 +26,9 @@ export interface JobPosting {
   department: string
   datePosted: string
   requirements: string[]
+  description?: string
+  salary_range?: string
+  employment_type?: string
 }
 
 export interface Employee {
@@ -42,6 +46,7 @@ export interface InsightData {
   leadershipChanges: LeadershipChange[]
   branchExpansions: BranchExpansion[]
   competitorComparison: CompetitorData[]
+  skillsTrends?: SkillTrend[]
 }
 
 export interface HiringTrend {
@@ -49,14 +54,16 @@ export interface HiringTrend {
   count: number
   trend: 'up' | 'down' | 'stable'
   keyRoles: string[]
+  growth?: number
 }
 
 export interface LeadershipChange {
   name: string
-  previousRole: string
+  previousRole?: string
   newRole: string
   date: string
   type: 'hire' | 'promotion' | 'departure'
+  department?: string
 }
 
 export interface BranchExpansion {
@@ -64,6 +71,14 @@ export interface BranchExpansion {
   date: string
   type: 'office' | 'branch' | 'facility'
   details: string
+  employee_count?: number
+}
+
+export interface SkillTrend {
+  skill: string
+  demand: number
+  growth: number
+  related_roles?: string[]
 }
 
 export interface CompetitorData {
@@ -71,60 +86,257 @@ export interface CompetitorData {
   hiringActivity: number
   leadershipChanges: number
   marketActivity: number
+  employeeCount?: number
+  recentExpansions?: number
+  socialEngagement?: number
+}
+
+export interface ApiError {
+  message: string
+  code?: string
+  details?: any
+}
+
+export interface ApiResponse<T> {
+  data: T | null
+  error: ApiError | null
+  loading: boolean
 }
 
 class ApiClient {
-  private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-    try {
-      const response = await fetch(`${API_BASE_URL}${endpoint}`, {
-        ...options,
-        headers: {
-          'Content-Type': 'application/json',
-          ...options.headers,
-        },
-      });
+  private baseUrl: string
+  private defaultHeaders: Record<string, string>
 
-      const data = await response.json();
+  constructor() {
+    this.baseUrl = API_BASE_URL
+    this.defaultHeaders = {
+      'Content-Type': 'application/json',
+    }
+  }
+
+  private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+    const url = `${this.baseUrl}${endpoint}`
+    
+    const requestOptions: RequestInit = {
+      ...options,
+      headers: {
+        ...this.defaultHeaders,
+        ...options.headers,
+      },
+    }
+
+    try {
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 30000) // 30 second timeout
+
+      const response = await fetch(url, {
+        ...requestOptions,
+        signal: controller.signal,
+      })
+
+      clearTimeout(timeoutId)
+
+      let data: any
+      const contentType = response.headers.get('content-type')
+      
+      if (contentType && contentType.includes('application/json')) {
+        data = await response.json()
+      } else {
+        data = await response.text()
+      }
 
       if (!response.ok) {
-        // Handle API error responses with detailed messages
-        const errorMessage = data.detail || data.message || response.statusText;
-        throw new Error(`API Error (${response.status}): ${errorMessage}`);
+        const errorMessage = this.getErrorMessage(data, response.status)
+        throw new Error(errorMessage)
       }
 
-      return data;
+      return data
     } catch (error) {
       if (error instanceof Error) {
-        // Re-throw API errors
-        throw error;
+        if (error.name === 'AbortError') {
+          throw new Error('Request timeout. Please try again.')
+        }
+        throw error
       }
-      // Handle network or parsing errors
-      throw new Error('Failed to connect to the API. Please check your connection and try again.');
+      throw new Error('An unexpected error occurred. Please try again.')
+    }
+  }
+
+  private getErrorMessage(data: any, status: number): string {
+    // Handle different error response formats
+    if (typeof data === 'string') {
+      return `Server Error (${status}): ${data}`
+    }
+    
+    if (data && typeof data === 'object') {
+      return data.detail || data.message || data.error || `Server Error (${status})`
+    }
+    
+    // Fallback for HTTP status codes
+    switch (status) {
+      case 400:
+        return 'Bad request. Please check your input and try again.'
+      case 401:
+        return 'Unauthorized. Please check your credentials.'
+      case 403:
+        return 'Access forbidden. You do not have permission to perform this action.'
+      case 404:
+        return 'Resource not found. The requested data could not be found.'
+      case 429:
+        return 'Too many requests. Please wait a moment and try again.'
+      case 500:
+        return 'Internal server error. Please try again later.'
+      case 502:
+        return 'Bad gateway. The server is temporarily unavailable.'
+      case 503:
+        return 'Service unavailable. Please try again later.'
+      default:
+        return `Server Error (${status}). Please try again.`
     }
   }
 
   async analyzeCompany(companyName: string, competitors: string[] = []): Promise<CompanyData> {
+    if (!companyName || !companyName.trim()) {
+      throw new Error('Company name is required')
+    }
+
     return this.request<CompanyData>('/companies/analyze', {
       method: 'POST',
-      body: JSON.stringify({ company_name: companyName, competitors }),
+      body: JSON.stringify({ 
+        company_name: companyName.trim(), 
+        competitors: competitors.filter(c => c.trim()).map(c => c.trim())
+      }),
     })
   }
 
   async getInsights(companyName: string): Promise<InsightData> {
-    return this.request<InsightData>(`/insights/${encodeURIComponent(companyName)}`)
+    if (!companyName || !companyName.trim()) {
+      throw new Error('Company name is required')
+    }
+
+    return this.request<InsightData>(`/insights/${encodeURIComponent(companyName.trim())}`)
   }
 
   async getCompetitorComparison(companies: string[]): Promise<CompetitorData[]> {
+    if (!companies || companies.length === 0) {
+      throw new Error('At least one company is required for comparison')
+    }
+
+    const validCompanies = companies.filter(c => c && c.trim()).map(c => c.trim())
+    if (validCompanies.length === 0) {
+      throw new Error('Please provide valid company names')
+    }
+
     return this.request<CompetitorData[]>('/competitors/compare', {
       method: 'POST',
-      body: JSON.stringify({ companies }),
+      body: JSON.stringify({ companies: validCompanies }),
     })
   }
 
-  async exportData(companyName: string, format: 'pdf' | 'csv' | 'json'): Promise<Blob> {
-    const response = await fetch(`${API_BASE_URL}/export/${encodeURIComponent(companyName)}?format=${format}`)
-    return response.blob()
+  async exportData(companyName: string, format: 'pdf' | 'csv' | 'json' = 'json'): Promise<any> {
+    if (!companyName || !companyName.trim()) {
+      throw new Error('Company name is required')
+    }
+
+    if (!['pdf', 'csv', 'json'].includes(format)) {
+      throw new Error('Invalid export format. Use pdf, csv, or json.')
+    }
+
+    if (format === 'json') {
+      return this.request<any>(`/companies/${encodeURIComponent(companyName.trim())}/export?format=${format}`)
+    } else {
+      // For PDF and CSV, return blob
+      const response = await fetch(`${this.baseUrl}/companies/${encodeURIComponent(companyName.trim())}/export?format=${format}`)
+      if (!response.ok) {
+        throw new Error(`Export failed: ${response.statusText}`)
+      }
+      return response.blob()
+    }
+  }
+
+  async getCompanyBasicInfo(companyName: string): Promise<any> {
+    if (!companyName || !companyName.trim()) {
+      throw new Error('Company name is required')
+    }
+
+    return this.request<any>(`/companies/${encodeURIComponent(companyName.trim())}/basic-info`)
+  }
+
+  async getCompanyPosts(companyName: string, limit: number = 10): Promise<Post[]> {
+    if (!companyName || !companyName.trim()) {
+      throw new Error('Company name is required')
+    }
+
+    if (limit < 1 || limit > 50) {
+      throw new Error('Limit must be between 1 and 50')
+    }
+
+    return this.request<Post[]>(`/companies/${encodeURIComponent(companyName.trim())}/posts?limit=${limit}`)
+  }
+
+  async getCompanyJobs(companyName: string, department?: string): Promise<JobPosting[]> {
+    if (!companyName || !companyName.trim()) {
+      throw new Error('Company name is required')
+    }
+
+    const params = new URLSearchParams()
+    if (department && department.trim()) {
+      params.append('department', department.trim())
+    }
+
+    const queryString = params.toString()
+    const endpoint = `/companies/${encodeURIComponent(companyName.trim())}/jobs${queryString ? `?${queryString}` : ''}`
+
+    return this.request<JobPosting[]>(endpoint)
+  }
+
+  // Health check endpoint
+  async healthCheck(): Promise<{ status: string; service: string }> {
+    return this.request<{ status: string; service: string }>('/health')
+  }
+
+  // Test connectivity
+  async testConnection(): Promise<boolean> {
+    try {
+      await this.healthCheck()
+      return true
+    } catch {
+      return false
+    }
   }
 }
 
 export const apiClient = new ApiClient()
+
+// Helper function to handle API calls with loading states
+export async function withApiCall<T>(
+  apiCall: () => Promise<T>,
+  onLoading?: (loading: boolean) => void,
+  onError?: (error: Error) => void
+): Promise<ApiResponse<T>> {
+  onLoading?.(true)
+  
+  try {
+    const data = await apiCall()
+    onLoading?.(false)
+    return { data, error: null, loading: false }
+  } catch (error) {
+    const apiError: ApiError = {
+      message: error instanceof Error ? error.message : 'An unexpected error occurred',
+      code: error instanceof Error ? error.name : 'UNKNOWN_ERROR',
+    }
+    
+    onLoading?.(false)
+    onError?.(error instanceof Error ? error : new Error('An unexpected error occurred'))
+    
+    return { data: null, error: apiError, loading: false }
+  }
+}
+
+// Environment check helper
+export function getApiConnectionStatus(): { isOnline: boolean; baseUrl: string } {
+  return {
+    isOnline: typeof window !== 'undefined' && navigator.onLine,
+    baseUrl: API_BASE_URL,
+  }
+}

@@ -10,6 +10,8 @@ class IndustryType(str, Enum):
     EDUCATION = "education"
     RETAIL = "retail"
     MANUFACTURING = "manufacturing"
+    SOFTWARE_DEVELOPMENT = "software_development"
+    CONSULTING = "consulting"
     OTHER = "other"
 
 class CompanySize(str, Enum):
@@ -44,12 +46,12 @@ class JobPosting(BaseModel):
     requirements: List[str] = []
     description: Optional[str] = None
     salary_range: Optional[str] = None
-    employment_type: Optional[str] = None
+    employment_type: Optional[str] = "full-time"
 
 class Company(BaseModel):
     name: str
-    industry: IndustryType
-    size: CompanySize
+    industry: str  # Changed from IndustryType to string for flexibility
+    size: str      # Changed from CompanySize to string for flexibility
     headquarters: str
     founded: Optional[int] = None
     website: Optional[str] = None
@@ -61,6 +63,7 @@ class CompanyAnalysis(BaseModel):
     company: Company
     recent_posts: List[CompanyPost] = []
     job_postings: List[JobPosting] = []
+    employees: List[Dict[str, Any]] = []  # Simplified for frontend compatibility
     key_metrics: Dict[str, Any] = {}
     analysis_date: datetime = Field(default_factory=datetime.now)
     
