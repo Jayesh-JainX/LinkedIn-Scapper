@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
 from pydantic import BaseModel
 from typing import List, Optional
 import logging
@@ -8,6 +8,8 @@ from app.models.company import CompanyAnalysis
 from app.services.linkedin_scraper import LinkedInScraper
 from app.services.data_processor import DataProcessor
 from app.services.insight_generator import InsightGenerator
+from app.repositories.data_repository import DataRepository
+from app.database import get_db
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -32,7 +34,7 @@ class CompanyAnalysisResponse(BaseModel):
     status: str = "completed"
 
 @router.post("/analyze", response_model=CompanyAnalysisResponse)
-async def analyze_company(request: CompanyAnalysisRequest, background_tasks: BackgroundTasks):
+async def analyze_company(request: CompanyAnalysisRequest, background_tasks: BackgroundTasks, db=Depends(get_db)):
     """Analyze a company's LinkedIn presence and generate insights"""
     if not request.company_name.strip():
         raise HTTPException(status_code=400, detail="Company name is required")
@@ -43,12 +45,45 @@ async def analyze_company(request: CompanyAnalysisRequest, background_tasks: Bac
         # Initialize services
         scraper = LinkedInScraper()
         processor = DataProcessor()
+        repository = DataRepository()
+        
+        # Create scraping session
+        session = repository.create_scraping_session(request.company_name)
         
         try:
+            # Check if we have recent data in database
+            cached_data = repository.get_company_data(request.company_name)
+            if cached_data:
+                logger.info(f"Using cached data for {request.company_name}")
+                repository.update_session_status(session.id, "completed")
+                return CompanyAnalysisResponse(
+                    name=cached_data["company"]["name"],
+                    industry=cached_data["company"]["industry"],
+                    size=cached_data["company"]["size"],
+                    headquarters=cached_data["company"]["headquarters"],
+                    recentPosts=cached_data["recent_posts"],
+                    jobPostings=cached_data["job_postings"],
+                    employees=cached_data["employees"]
+                )
+            
+            # Update session status to running
+            repository.update_session_status(session.id, "running")
+            
             # Scrape company data
             raw_data = await scraper.scrape_company_data(request.company_name)
+            
+            # Save data to database
+            company = repository.save_company_data(session.id, raw_data["company"])
+            repository.save_posts_data(session.id, company.id, raw_data["recent_posts"])
+            repository.save_jobs_data(session.id, company.id, raw_data["job_postings"])
+            repository.save_employees_data(session.id, company.id, raw_data["employees"])
+            
+            # Update session status to completed
+            repository.update_session_status(session.id, "completed")
+            
         except Exception as e:
             logger.error(f"Failed to scrape data: {str(e)}")
+            repository.update_session_status(session.id, "failed", str(e))
             raise HTTPException(status_code=500, detail=f"Failed to collect company data: {str(e)}")
         
         try:

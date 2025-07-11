@@ -5,6 +5,8 @@ import logging
 from contextlib import asynccontextmanager
 
 from app.api.routes import router as api_router
+from app.database import create_tables
+from app.models.database_models import *
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -14,6 +16,9 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     # Startup
     logger.info("Starting LinkedIn Research Tool API")
+    # Create database tables
+    create_tables()
+    logger.info("Database tables created/verified")
     yield
     # Shutdown
     logger.info("Shutting down LinkedIn Research Tool API")

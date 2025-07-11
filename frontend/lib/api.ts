@@ -200,13 +200,30 @@ class ApiClient {
       throw new Error('Company name is required')
     }
 
-    return this.request<CompanyData>('/companies/analyze', {
-      method: 'POST',
-      body: JSON.stringify({ 
-        company_name: companyName.trim(), 
-        competitors: competitors.filter(c => c.trim()).map(c => c.trim())
-      }),
-    })
+    const requestBody = {
+      company_name: companyName.trim(),
+      competitors: competitors.filter(c => c.trim()),
+      include_employees: true,
+      include_posts: true,
+      include_jobs: true,
+      max_employees: 100,
+      days_back: 30
+    }
+
+    console.log('Sending analysis request:', requestBody)
+    
+    try {
+      const response = await this.request<CompanyData>('/companies/analyze', {
+        method: 'POST',
+        body: JSON.stringify(requestBody)
+      })
+      
+      console.log('Analysis response received:', response)
+      return response
+    } catch (error) {
+      console.error('Analysis request failed:', error)
+      throw error
+    }
   }
 
   async getInsights(companyName: string): Promise<InsightData> {

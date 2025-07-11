@@ -1,5 +1,4 @@
 fastapi==0.116.0
-
 uvicorn==0.24.0
 pydantic==2.5.0
 requests==2.31.0
@@ -15,4 +14,26 @@ passlib==1.7.4
 python-dotenv==1.0.0
 httpx==0.25.2
 lxml==4.9.3
-fake-useragent==1.4.0
+
+# Database
+sqlalchemy==2.0.23
+alembic==1.13.1
+psycopg2-binary==2.9.9
+
+# Real LinkedIn Scraping
+undetected-chromedriver==3.5.4
+webdriver-manager==4.0.1
+
+# Data Processing
+openai==1.3.7
+langchain==0.0.350
+langchain-openai==0.0.2
+nltk==3.8.1
+textblob==0.17.1
+
+# Additional utilities
+aiohttp==3.9.1
+asyncio-throttle==1.0.2
+ratelimit==2.2.1
+python-dateutil==2.8.2
+pytz==2023.3

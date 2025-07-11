@@ -6,6 +6,7 @@ import logging
 
 from app.models.company import Company, CompanyPost, JobPosting, PostType
 from app.models.employee import Employee, EmployeeProfile, EmployeeLevel
+from app.services.real_linkedin_scraper import RealLinkedInScraper
 
 logger = logging.getLogger(__name__)
 
@@ -16,16 +17,19 @@ load_dotenv()
 
 class LinkedInScraper:
     """
-    LinkedIn data scraper service with robust mock data for development
+    LinkedIn data scraper service with real data collection capabilities
     """
     
     def __init__(self):
         self.email = os.getenv('LINKEDIN_EMAIL')
         self.password = os.getenv('LINKEDIN_PASSWORD')
         self.use_mock_data = not (self.email and self.password)  # Use mock data if no credentials
+        self.real_scraper = RealLinkedInScraper()
         
         if self.use_mock_data:
             logger.info("LinkedIn credentials not found. Using mock data for development.")
+        else:
+            logger.info("LinkedIn credentials found. Using real data scraping.")
         
     async def scrape_company_data(self, company_name: str) -> Dict[str, Any]:
         """Scrape comprehensive company data from LinkedIn or return mock data"""
@@ -41,6 +45,10 @@ class LinkedInScraper:
             logger.error(f"Failed to scrape company data: {str(e)}")
             logger.info("Falling back to mock data")
             return await self._generate_mock_company_data(company_name)
+        finally:
+            # Always close the real scraper
+            if hasattr(self, 'real_scraper') and self.real_scraper:
+                self.real_scraper.close()
     
     async def _generate_mock_company_data(self, company_name: str) -> Dict[str, Any]:
         """Generate comprehensive mock data for development and testing"""
@@ -120,11 +128,13 @@ class LinkedInScraper:
         }
     
     async def _scrape_real_data(self, company_name: str) -> Dict[str, Any]:
-        """Scrape real data from LinkedIn (placeholder for actual implementation)"""
-        # This would contain the actual Selenium scraping logic
-        # For now, falling back to mock data
-        logger.warning("Real LinkedIn scraping not fully implemented. Using mock data.")
-        return await self._generate_mock_company_data(company_name)
+        """Scrape real data from LinkedIn using the real scraper"""
+        try:
+            logger.info(f"Starting real LinkedIn scraping for: {company_name}")
+            return await self.real_scraper.scrape_company_data(company_name)
+        except Exception as e:
+            logger.error(f"Real scraping failed: {str(e)}")
+            raise
     
     def _generate_mock_post_content(self, company_name: str, post_type: PostType) -> str:
         """Generate realistic post content based on type"""
